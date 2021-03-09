@@ -1,0 +1,252 @@
+---
+title: "Old Faithful Eruptions"
+output: flexdashboard::flex_dashboard
+runtime: shiny
+orientation: Columns
+vertical_layout: scroll
+
+---
+  
+```{r global, include=FALSE}
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+library(datasets)
+data(faithful)
+library(tidyverse)
+library(dbplyr)
+library(RMariaDB)
+library(knitr)
+library(tidyr)
+library(codebook)
+library(dataMaid)
+library(readr)
+library(forcats)
+library(explore)
+interactive()
+library(explore)
+library(skimr)
+library(stringr)
+library(pacman)
+library(DataExplorer)
+library(lubridate)
+```
+
+
+
+
+
+Sidebar {.sidebar}
+=====================================
+  
+  If you want to choose specific columns, in **Column Group** choose "Column Chosen" and then choose the fields in **Column Names**.
+
+```{r include=FALSE}
+
+con = DBI::dbConnect(RMariaDB::MariaDB(), 
+                     host = "comadb.co4whvnrfjvp.us-east-2.rds.amazonaws.com",
+                     user = "s.sajad",
+                     password ="Hk&3ag8*2j",
+                     dbname='comadb')
+dblist <- dbListTables(con)
+
+```
+
+```{r include=FALSE}
+query <- reactive({
+  res = dbSendQuery(con,  paste("select * from ", input$table, " limit 5" ))
+  a = dbFetch(res)
+  b = a %>% as_tibble()
+  
+})
+
+```
+
+
+
+```{r}
+selectInput("table", label = "Name of table:",
+            choices = dblist , selected = "clientes")
+
+selectInput("columntype", label = "Column groups:",
+            choices = c("All","Number","Text","Date", "Column chosen") , selected = "All")
+
+renderUI({
+  muts <- query()
+  selectInput("columnname", label = "Column Names:",
+              choices =  names(muts), multiple = TRUE)
+})
+renderUI({
+  muts <- query()
+  selectInput("y", label = "Response Variable:",
+              choices =  names(muts))
+})
+renderUI({
+  muts <- query()
+  selectInput("x", label = "explanatory variable:",
+              choices =  names(muts))
+})
+renderUI({
+  muts <- query()
+  selectInput("color", label = "Color:",
+              choices =  names(muts))
+})
+
+
+selectInput("n_breaks", label = "Number of bins:",
+            choices = c(10, 20, 35, 50), selected = 20)
+
+sliderInput("bw_adjust", label = "Bandwidth adjustment:",
+            min = 0.2, max = 2, value = 1, step = 0.2)
+```
+
+
+```{r include=FALSE}
+mediancolumns <- reactive({
+  fin <- query()
+  type <- input$columntype
+  selectedcolumns <- 
+    
+    case_when(type == "All"            ~ "everything()",
+              type == "Number"         ~ "where(is.numeric), where(is.complex)",
+              type == "Text"           ~ "where(is.character), where(is.factor)",
+              type == "Date"           ~ "where(lubridate::is.POSIXt), where(lubridate::is.Date),                                                              where(lubridate::is.POSIXct), where(lubridate::is.POSIXlt),                                                          where(lubridate::is.timepoint)",
+              type == "Column chosen"  ~ "",
+              TRUE                     ~ "other"
+    )
+  group_select <- eval(parse(text= paste("fin  %>%  select(",selectedcolumns,")") ))
+  group_select <- names(group_select)
+  individual_select <- input$columnname
+  selcol <- union(group_select, individual_select)
+  selcol
+})
+```
+
+
+```{r include=FALSE}
+datar <- reactive({
+  finalcol <-  mediancolumns
+  res = dbSendQuery(con,  paste("select * from ", input$table))
+  a = dbFetch(res)
+  b = a %>% as_tibble()
+  c= b %>% select(finalcol())
+  c
+})
+
+```
+
+
+
+Table Status
+=====================================   
+  
+  Column {.tabset}
+-----------------------------------------------------------------------
+  
+  ### Short Summary 
+  
+  
+```{r}
+renderTable({
+  muts <- datar()
+  introduce(muts) %>% pivot_longer(everything(), names_to = "Name", values_to = "Value")
+})
+```
+
+
+### Columns Summary
+
+```{r}
+renderPlot({
+  muts <- datar()
+  plot_intro(muts) 
+})
+```
+
+
+### Missing Status
+
+```{r}
+renderPlot({
+  muts <- datar()
+  plot_missing(muts)
+})
+```
+
+
+Table Details
+=====================================  
+  
+  Column 1 {.tabset}
+--------------------------------------------------
+  
+  ### Table details
+  
+```{r}
+
+numfields <-  "where(is.numeric), where(is.complex)"
+charfields <- "where(is.character), where(is.factor)"
+datefields  <- "where(lubridate::is.POSIXt), where(lubridate::is.Date), where(lubridate::is.POSIXct), where(lubridate::is.POSIXlt), where(lubridate::is.timepoint)"
+allfields <- "everything()"
+
+
+renderDataTable({
+  fields <- datar()
+  
+  fskim = skimr::skim(fields)
+  
+}
+, options = list(scrollX = TRUE, width="100%", pageLength = 100, scrollY = "400px",
+                 columnDefs = list(list( targets = "_all", searchable = FALSE))
+)
+) 
+```
+
+### Bar
+```{r}
+renderPlot({
+  muts <- datar()
+  plot_bar(muts)
+})
+```
+
+### density
+```{r}
+renderPlot({
+  muts <- datar()
+  plot_density(muts)
+})
+```
+
+
+
+Analysis
+=====================================  
+  
+  Column 1 {.tabset}
+--------------------------------------------------
+  
+  ### Correlation
+```{r}
+renderPlot({
+  muts <- datar()
+  plot_correlation(muts)
+})
+```
+
+
+### Plot
+```{r}
+drawplot <- function(df, x, y, color) {
+  
+  ggplot(df, aes_string(x=x, y=y, color=color)) + geom_point()
+}
+shiny::renderPlot({
+  muts <- datar()
+  muts %>% drawplot( input$x, input$y, input$color)
+})
+```
+
+
+
+
+
+
